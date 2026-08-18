@@ -258,19 +258,14 @@ async def main():
         for n in selected
     ]
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    (OUT / "summary.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "selected": len(selected),
-                "source_counts": counts,
-                "country_counts": by_country,
-                "generated_files": ["output/top50.txt", "output/top50.b64.txt", "output/report.json"],
-            },
-            allow_unicode=True,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
+
+    summary = {
+        "selected": len(selected),
+        "source_counts": counts,
+        "country_counts": by_country,
+        "generated_files": ["output/top50.txt", "output/top50.b64.txt", "output/report.json"],
+    }
+    (OUT / "summary.yaml").write_text(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 if __name__ == "__main__":
     asyncio.run(main())
