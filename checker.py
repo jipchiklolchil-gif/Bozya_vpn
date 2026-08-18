@@ -72,6 +72,7 @@ FLAG_MAP = {
 
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 
+
 def decode_text(raw: bytes) -> str:
     text = raw.decode("utf-8", errors="ignore").strip()
     if any(x in text for x in ("vless://", "vmess://", "trojan://", "hysteria2://", "hy2://")):
@@ -85,10 +86,12 @@ def decode_text(raw: bytes) -> str:
         pass
     return text
 
+
 def fetch_subscription(sub):
     r = requests.get(sub["value"], timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
     return decode_text(r.content)
+
 
 def extract_lines(text: str):
     lines = []
@@ -104,6 +107,7 @@ def extract_lines(text: str):
         elif "://" in part:
             lines.append(part)
     return lines
+
 
 def parse_node(uri: str, source: str):
     scheme = uri.split("://", 1)[0].lower()
@@ -128,11 +132,13 @@ def parse_node(uri: str, source: str):
     except Exception:
         return None
 
+
 def resolve_host(host):
     try:
         return socket.gethostbyname(host)
     except Exception:
         return None
+
 
 def country_from_label(label: str):
     s = label.lower()
@@ -160,6 +166,7 @@ def country_from_label(label: str):
             return code
     return None
 
+
 def ip_country(ip):
     if not ip or not IPINFO_TOKEN:
         return None
@@ -170,6 +177,7 @@ def ip_country(ip):
     except Exception:
         return None
     return None
+
 
 async def tcp_probe(host, port, timeout=3.5, attempts=3):
     times = []
@@ -196,6 +204,7 @@ async def tcp_probe(host, port, timeout=3.5, attempts=3):
         "jitter_ms": round(statistics.pstdev(times), 1) if len(times) > 1 else 0.0,
     }
 
+
 def calc_score(node):
     result = node["probe"]
     score = result["success_rate"] * 100
@@ -205,6 +214,7 @@ def calc_score(node):
         score -= min(result["jitter_ms"], 100) / 5
     return round(score, 2)
 
+
 def rename_node(node, idx):
     cc = node.get("country") or "UNKNOWN"
     country = COUNTRY_MAP.get(cc, cc)
@@ -213,6 +223,7 @@ def rename_node(node, idx):
     base = node["uri"].split("#", 1)[0]
     node["display_name"] = display_name
     node["renamed_uri"] = f"{base}#{requests.utils.requote_uri(display_name)}"
+
 
 async def main():
     all_nodes = []
@@ -304,6 +315,7 @@ async def main():
         ),
         encoding="utf-8",
     )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
