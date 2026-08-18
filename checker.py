@@ -2,7 +2,6 @@ import asyncio
 import base64
 import json
 import os
-import re
 import socket
 import statistics
 import time
@@ -22,13 +21,13 @@ PER_SOURCE_LIMITS = {
     "akonit": 10,
 }
 DENY_COUNTRIES = {"RU"}
-ALLOWED_SCHEMES = {"vless", "vmess", "trojan", "hysteria2", "hy2"}
+ALLOWED_SCHEMES = ("vless://", "vmess://", "trojan://", "hysteria2://", "hy2://")
 
 SUBSCRIPTIONS = [
-    {"name": "aska", "type": "url", "value": "https://sub.aska.lol/Ux7lmK0xkIl2"},
-    {"name": "connliberty", "type": "url", "value": "https://connliberty.com/connection/subs/dcf2b960-d490-40dd-a18b-1718550f939e"},
-    {"name": "akonit", "type": "url", "value": "https://akonit.tech/sub/f9afd2d3-3858-403e-bbc9-9a720420c188"},
-    {"name": "vlessforu", "type": "url", "value": "https://sub.vlessfo.ru/vlessforu/working_configs.txt"},
+    {"name": "aska", "value": "https://sub.aska.lol/Ux7lmK0xkIl2"},
+    {"name": "connliberty", "value": "https://connliberty.com/connection/subs/dcf2b960-d490-40dd-a18b-1718550f939e"},
+    {"name": "akonit", "value": "https://akonit.tech/sub/f9afd2d3-3858-403e-bbc9-9a720420c188"},
+    {"name": "vlessforu", "value": "https://sub.vlessfo.ru/vlessforu/working_configs.txt"},
 ]
 
 COUNTRY_MAP = {
@@ -73,47 +72,46 @@ FLAG_MAP = {
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 
 
-def decode_text(raw: bytes) -> str:
+def decode_text(raw):
     text = raw.decode("utf-8", errors="ignore").strip()
-    if any(x in text for x in ("vless://", "vmess://", "trojan://", "hysteria2://", "hy2://")):
+    if any(prefix in text for prefix in ALLOWED_SCHEMES):
         return text
     try:
         padded = text + "=" * (-len(text) % 4)
         decoded = base64.b64decode(padded).decode("utf-8", errors="ignore")
-        if any(x in decoded for x in ("vless://", "vmess://", "trojan://", "hysteria2://", "hy2://")):
+        if any(prefix in decoded for prefix in ALLOWED_SCHEMES):
             return decoded
     except Exception:
         pass
     return text
 
 
-def fetch_subscription(sub):
-    r = requests.get(sub["value"], timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+def fetch_subscription(url):
+    r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
     return decode_text(r.content)
 
 
-def extract_lines(text: str):
-    lines = []
-    parts = re.split(r"[
-]+", text)
-    for part in parts:
-        part = part.strip()
-        if not part:
+def extract_lines(text):
+    result = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
             continue
-        found = re.findall(r"(?:vless|vmess|trojan|hysteria2|hy2)://[^s]+", part)
-        if found:
-            lines.extend(found)
-        elif "://" in part:
-            lines.append(part)
-    return lines
+        if line.startswith(ALLOWED_SCHEMES):
+            result.append(line)
+            continue
+        for token in line.split():
+            if token.startswith(ALLOWED_SCHEMES):
+                result.append(token)
+    return result
 
 
-def parse_node(uri: str, source: str):
-    scheme = uri.split("://", 1)[0].lower()
-    if scheme not in ALLOWED_SCHEMES:
-        return None
+def parse_node(uri, source):
     try:
+        scheme = uri.split("://", 1)[0].lower()
+        if scheme not in ("vless", "vmess", "trojan", "hysteria2", "hy2"):
+            return None
         fragment = unquote(uri.split("#", 1)[1]) if "#" in uri else ""
         base = uri.split("#", 1)[0]
         parsed = urlsplit(base)
@@ -140,9 +138,9 @@ def resolve_host(host):
         return None
 
 
-def country_from_label(label: str):
+def country_from_label(label):
     s = label.lower()
-    mapping = [
+    pairs = [
         ("нидер", "NL"), ("netherlands", "NL"), ("nl ", "NL"),
         ("фин", "FI"), ("finland", "FI"),
         ("швец", "SE"), ("sweden", "SE"),
@@ -161,7 +159,7 @@ def country_from_label(label: str):
         ("поль", "PL"), ("poland", "PL"),
         ("росс", "RU"), ("russia", "RU"),
     ]
-    for token, code in mapping:
+    for token, code in pairs:
         if token in s:
             return code
     return None
@@ -175,7 +173,7 @@ def ip_country(ip):
         if r.ok:
             return r.json().get("country")
     except Exception:
-        return None
+        pass
     return None
 
 
@@ -183,10 +181,10 @@ async def tcp_probe(host, port, timeout=3.5, attempts=3):
     times = []
     ok = 0
     for _ in range(attempts):
-        start = time.perf_counter()
+        started = time.perf_counter()
         try:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
-            elapsed = (time.perf_counter() - start) * 1000
+            elapsed = (time.perf_counter() - started) * 1000
             times.append(round(elapsed, 1))
             ok += 1
             writer.close()
@@ -206,13 +204,13 @@ async def tcp_probe(host, port, timeout=3.5, attempts=3):
 
 
 def calc_score(node):
-    result = node["probe"]
-    score = result["success_rate"] * 100
-    if result["median_ms"] is not None:
-        score += max(0, 250 - result["median_ms"]) / 5
-    if result["jitter_ms"] is not None:
-        score -= min(result["jitter_ms"], 100) / 5
-    return round(score, 2)
+    probe = node["probe"]
+    value = probe["success_rate"] * 100
+    if probe["median_ms"] is not None:
+        value += max(0, 250 - probe["median_ms"]) / 5
+    if probe["jitter_ms"] is not None:
+        value -= min(probe["jitter_ms"], 100) / 5
+    return round(value, 2)
 
 
 def rename_node(node, idx):
@@ -230,8 +228,9 @@ async def main():
 
     for sub in SUBSCRIPTIONS:
         try:
-            text = fetch_subscription(sub)
-            for line in extract_lines(text):
+            text = fetch_subscription(sub["value"])
+            lines = extract_lines(text)
+            for line in lines:
                 node = parse_node(line, sub["name"])
                 if node:
                     all_nodes.append(node)
